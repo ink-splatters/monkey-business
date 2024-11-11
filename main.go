@@ -1,14 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net/http"
+	"net/http/httptrace"
 	"os"
 	"strconv"
-	"bytes"
-	"io/ioutil"
 )
 
 func check(res *http.Response) {
@@ -18,6 +19,28 @@ func check(res *http.Response) {
 }
 
 func main() {
+	trace := &httptrace.ClientTrace{
+		DNSStart: func(info httptrace.DNSStartInfo) {
+			fmt.Println("DNS lookup started:", info.Host)
+		},
+		DNSDone: func(info httptrace.DNSDoneInfo) {
+			fmt.Println("DNS lookup done:", info.Addrs)
+		},
+		ConnectStart: func(network, addr string) {
+			fmt.Println("Connecting to:", addr)
+		},
+		ConnectDone: func(network, addr string, err error) {
+			if err != nil {
+				fmt.Println("Failed to connect:", err)
+			} else {
+				fmt.Println("Connected to:", addr)
+			}
+		},
+		GotFirstResponseByte: func() {
+			fmt.Println("Received first byte of response")
+		},
+	}
+
 	token := os.Getenv("ODIDO_TOKEN")
 	if token == "" {
 		log.Fatal("ODIDO_TOKEN environment variable is not set")
@@ -33,7 +56,9 @@ func main() {
 	}
 
 	client := &http.Client{}
-	req, _ := http.NewRequest("GET", "https://capi.t-mobile.nl/account/current?resourcelabel=LinkedSubscriptions", nil)
+	req, _ := http.NewRequest("GET",
+		"https://capi.t-mobile.nl/account/current?resourcelabel=LinkedSubscriptions", nil)
+
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("User-Agent", "T-Mobile 5.3.28 (Android 10; 10)")
 	req.Header.Set("Accept", "application/json")
@@ -84,7 +109,9 @@ func main() {
 	subscriptionUrl := dict2["subscriptions"].([]interface{})[0].(map[string]interface{})["SubscriptionURL"].(string)
 
 	// Third request
-	req, _ = http.NewRequest("GET", subscriptionUrl+"/roamingbundles", nil)
+	req, _ = http.NewRequest("GET", subscriptionUrl+"/roamingbundles",
+		nil).WithContext(httptrace.WithClientTrace(req.Context(), trace))
+
 	req.Header.Set("Authorization", "Bearer "+token)
 	res, err = client.Do(req)
 	if err != nil {
